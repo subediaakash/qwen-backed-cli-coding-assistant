@@ -4,6 +4,15 @@ import { executeTool, getToolDefinitions } from "./tools/tools.ts";
 const MODEL = "qwen3:4b";
 const MAX_STEPS = 5;
 
+const ANSWER_SCHEMA = {
+  type: "object",
+  properties: {
+    answer: { type: "string" },
+    files: { type: "array", items: { type: "string" } },
+  },
+  required: ["answer", "files"],
+};
+
 async function main() {
   const messages: Message[] = [
     {
@@ -13,7 +22,7 @@ async function main() {
     },
     {
       role: "user",
-      content: "where is the tools.ts file in my repo ?",
+      content: "List files in ../../",
     },
   ];
 
@@ -31,11 +40,21 @@ async function main() {
     messages.push(response.message);
     const toolCalls = response.message.tool_calls ?? [];
 
-    // No tool calls means the model has produced its final answer.
+    // No tool calls means the model is done; ask it to restate the answer as structured JSON.
     if (toolCalls.length === 0) {
-      // qwen3 sometimes leaks its reasoning into content even with think: false.
-      const answer = response.message.content.replace(/^[\s\S]*?<\/think>/, "").trim();
-      console.log(answer);
+      const final = await ollama.chat({
+        model: MODEL,
+        messages: [
+          ...messages,
+          { role: "user", content: "Return your answer as JSON matching the schema." },
+        ],
+        format: ANSWER_SCHEMA,
+        think: false,
+        stream: false,
+      });
+
+      const result = JSON.parse(final.message.content);
+      console.log(JSON.stringify(result, null, 2));
       return;
     }
 

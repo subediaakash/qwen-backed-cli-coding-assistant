@@ -4,13 +4,13 @@ const tools = [
     {
         type : "function" as const ,
         name :"ListFiles",
-        description : "List all files in a directory and its subdirectories.",
+        description : "List files in a workspace directory and its subdirectories (paths relative to the workspace root). Only directories inside the workspace are allowed; returns at most 200 files with a total count.",
         parameters : {
             type : "object" as const ,
             properties : {
                 dir : {
                     type : "string" as const ,
-                    description : "The directory to list files from.",
+                    description : "Directory inside the workspace to list, e.g. \".\" for the root or \"src\".",
                 },
             },
             required : ["dir"],
