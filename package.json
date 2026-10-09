@@ -1,0 +1,19 @@
+{
+  "name": "qwen-backed-cli-assistant",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "-": "^0.0.1-security.1",
+    "@types/node": "^26.6.4",
+    "D": "^1.0.0",
+    "ollama": "^0.6.4",
+    "tsx": "^4.23.15"
+  }
+}
