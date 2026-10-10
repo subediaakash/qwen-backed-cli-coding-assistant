@@ -1,6 +1,7 @@
 import type {Tool} from 'ollama';
 import {listFiles} from './core/list_files.ts';
 import {readWorkspaceFile} from './core/read_files.ts';
+import {gitDiffFile, gitDiffSummary, gitLog} from './core/git.ts';
 
 type ToolEntry = {
     type: "function";
@@ -45,6 +46,76 @@ const tools: ToolEntry[] = [
         },
         func : async (args: { path: string }) => {
             return await readWorkspaceFile(args);
+        },
+    },
+    {
+        type : "function" as const ,
+        name :"GitDiff",
+        description : "Summarize what a PR changed: every changed file with its status (A added, M modified, D deleted) and lines added/deleted, compared against the merge base of base and head. Generated lockfiles are listed under \"ignored\" and should not be reviewed. Call this first, then GitDiffFile for individual files.",
+        parameters : {
+            type : "object" as const ,
+            properties : {
+                base : {
+                    type : "string" as const ,
+                    description : "Base ref the PR merges into, e.g. \"main\".",
+                },
+                head : {
+                    type : "string" as const ,
+                    description : "PR branch or commit to review. Defaults to \"HEAD\".",
+                },
+            },
+            required : ["base"],
+        },
+        func : async (args: { base: string; head?: string }) => {
+            return await gitDiffSummary(args);
+        },
+    },
+    {
+        type : "function" as const ,
+        name :"GitDiffFile",
+        description : "Show the unified diff of a single file changed by the PR (base...head). Use paths exactly as returned by GitDiff.",
+        parameters : {
+            type : "object" as const ,
+            properties : {
+                base : {
+                    type : "string" as const ,
+                    description : "Base ref the PR merges into, e.g. \"main\".",
+                },
+                head : {
+                    type : "string" as const ,
+                    description : "PR branch or commit to review. Defaults to \"HEAD\".",
+                },
+                path : {
+                    type : "string" as const ,
+                    description : "Changed file path relative to the workspace root, e.g. \"src/index.ts\".",
+                },
+            },
+            required : ["base", "path"],
+        },
+        func : async (args: { base: string; head?: string; path: string }) => {
+            return await gitDiffFile(args);
+        },
+    },
+    {
+        type : "function" as const ,
+        name :"GitLog",
+        description : "List the commits in the PR (on head but not on base), newest first, with hash, author, subject and body. Commit messages describe what the change is meant to do.",
+        parameters : {
+            type : "object" as const ,
+            properties : {
+                base : {
+                    type : "string" as const ,
+                    description : "Base ref the PR merges into, e.g. \"main\".",
+                },
+                head : {
+                    type : "string" as const ,
+                    description : "PR branch or commit to review. Defaults to \"HEAD\".",
+                },
+            },
+            required : ["base"],
+        },
+        func : async (args: { base: string; head?: string }) => {
+            return await gitLog(args);
         },
     }
 ]

@@ -2,7 +2,8 @@ import ollama, { type Message } from "ollama";
 import { executeTool, getToolDefinitions } from "./tools/tools.ts";
 
 const DEFAULT_MODEL = "qwen3:8b";
-const DEFAULT_MAX_STEPS = 5;
+const DEFAULT_MAX_STEPS = 15;
+const DEFAULT_FINAL_PROMPT = "Return your answer as JSON matching the schema.";
 // Ollama defaults to a small context window and silently drops older tokens past it.
 const DEFAULT_NUM_CTX = 32768;
 // A single huge tool result can eat the whole context window, so cap it here for every tool.
@@ -16,9 +17,15 @@ export interface AgentConfig {
   model?: string;
   maxSteps?: number;
   numCtx?: number;
-  // Defaults to true when the model supports thinking. Thinking-only models (e.g. Qwen3-4B-Thinking-2507)
-  // reason regardless, and with think: false that reasoning leaks into message.content.
+  // Thinking for the tool-calling steps. Defaults to true when the model supports thinking.
+  // Thinking-only models (e.g. Qwen3-4B-Thinking-2507) reason regardless, and with think: false
+  // that reasoning leaks into message.content.
   think?: boolean;
+  // Thinking for the final structured answer, where the judgement happens. Defaults to `think`.
+  // Ignored when the model doesn't support thinking.
+  thinkFinal?: boolean;
+  // Instruction sent with the final call, once the model stops calling tools or runs out of steps.
+  finalPrompt?: string;
 }
 
 export interface ToolCallTrace {
@@ -31,7 +38,7 @@ export interface ToolCallTrace {
 }
 
 export interface TraceStep {
-  step: number;
+  step: number | "final";
   promptTokens: number;
   outputTokens: number;
   ms: number;
@@ -44,6 +51,7 @@ export type StopReason = "done" | "max_steps" | "bad_json";
 export interface AgentResult<T> {
   model: string;
   think: boolean;
+  thinkFinal: boolean;
   output: T | null;
   stopReason: StopReason;
   trace: TraceStep[];
@@ -70,7 +78,9 @@ export async function runAgent<T = unknown>(config: AgentConfig): Promise<AgentR
   const model = config.model ?? DEFAULT_MODEL;
   const maxSteps = config.maxSteps ?? DEFAULT_MAX_STEPS;
   const options = { num_ctx: config.numCtx ?? DEFAULT_NUM_CTX };
-  const think = config.think ?? (await supportsThinking(model));
+  const canThink = await supportsThinking(model);
+  const think = config.think ?? canThink;
+  const thinkFinal = canThink && (config.thinkFinal ?? think);
   const tools = getToolDefinitions(config.tools);
   const trace: TraceStep[] = [];
 
@@ -78,6 +88,34 @@ export async function runAgent<T = unknown>(config: AgentConfig): Promise<AgentR
     { role: "system", content: config.system },
     { role: "user", content: config.user },
   ];
+
+  // The final call has no tools, so the model must answer from what it gathered, in the schema's shape.
+  async function finish(stopReason: "done" | "max_steps"): Promise<AgentResult<T>> {
+    const started = performance.now();
+    const final = await ollama.chat({
+      model,
+      messages: [...messages, { role: "user", content: config.finalPrompt ?? DEFAULT_FINAL_PROMPT }],
+      format: config.schema,
+      options,
+      think: thinkFinal,
+      stream: false,
+    });
+    trace.push({
+      step: "final",
+      promptTokens: final.prompt_eval_count,
+      outputTokens: final.eval_count,
+      ms: performance.now() - started,
+      thinking: final.message.thinking,
+      toolCalls: [],
+    });
+
+    const base = { model, think, thinkFinal, trace };
+    try {
+      return { ...base, output: JSON.parse(final.message.content) as T, stopReason };
+    } catch {
+      return { ...base, output: null, stopReason: "bad_json", raw: final.message.content };
+    }
+  }
 
   for (let step = 0; step < maxSteps; step++) {
     const started = performance.now();
@@ -98,23 +136,10 @@ export async function runAgent<T = unknown>(config: AgentConfig): Promise<AgentR
     };
     trace.push(stepTrace);
 
-    // No tool calls means the model is done; ask it to restate the answer as structured JSON.
+    // No tool calls means the model has gathered enough; the final call produces the answer.
     if (toolCalls.length === 0) {
-      const final = await ollama.chat({
-        model,
-        messages: [...messages, { role: "user", content: "Return your answer as JSON matching the schema." }],
-        format: config.schema,
-        options,
-        think,
-        stream: false,
-      });
       stepTrace.ms = performance.now() - started;
-
-      try {
-        return { model, think, output: JSON.parse(final.message.content) as T, stopReason: "done", trace };
-      } catch {
-        return { model, think, output: null, stopReason: "bad_json", trace, raw: final.message.content };
-      }
+      return finish("done");
     }
 
     for (const call of toolCalls) {
@@ -146,5 +171,6 @@ export async function runAgent<T = unknown>(config: AgentConfig): Promise<AgentR
     stepTrace.ms = performance.now() - started;
   }
 
-  return { model, think, output: null, stopReason: "max_steps", trace };
+  // Out of steps: still answer from what was gathered, but report that the budget ran out.
+  return finish("max_steps");
 }
