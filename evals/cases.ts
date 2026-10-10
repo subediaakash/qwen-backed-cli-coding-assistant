@@ -16,7 +16,7 @@ export interface EvalCase {
   expected: ExpectedBug[];
 }
 
-// Branch review-test (local): c3ba151 adds a clean src/test/cart.ts, 47d9419 "refactor: tidy up cart helpers"
+// Branch review-test (local): 271074e adds a clean src/test/cart.ts, f80019b "refactor: tidy up cart helpers"
 // plants three bugs and adds one harmless comment.
 const CART_BUGS: ExpectedBug[] = [
   { id: "off-by-one", file: "src/test/cart.ts", line: 9, keywords: ["<=", "off-by-one", "out-of-bounds", "out of bounds"] },

@@ -128,7 +128,7 @@ harness: merge → markdown report
 - [x] 4d — `bun run review <base> [head]` (`src/review/`). It's still one agent run, not per-file; revisit for large PRs.
 - [x] 4e — Evidence check: drop findings whose `evidence` doesn't appear in the file's diff.
 - [x] 4f — Terminal report: findings with severity, file:line, message and quoted evidence; lines moved by the harness are marked "(model said line N)"; dropped findings are listed with a reason.
-- [x] Test: branch `review-test` (two commits on 684d832). `c3ba151` adds a clean `src/test/cart.ts`; `47d9419` "refactor: tidy up cart helpers" plants 3 bugs: `i <= items.length` (line 9), the removed `percent > 100` check (line 16), and the removed `await` hidden by `as unknown as Item[]` (line 21). It also adds one harmless comment.
+- [x] Test: branch `review-test` (two commits on 684d832). `271074e` adds a clean `src/test/cart.ts`; `f80019b` "refactor: tidy up cart helpers" plants 3 bugs: `i <= items.length` (line 9), the removed `percent > 100` check (line 16), and the removed `await` hidden by `as unknown as Item[]` (line 21). It also adds one harmless comment.
 
   | Base | Run | Bugs found | False alarms | Lines | Time |
   |---|---|---|---|---|---|
