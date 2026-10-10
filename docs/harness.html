@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Inside the Qwen Review Harness</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one calm reading column, like a lesson handout. One idea per section.
+   Colour means a role everywhere: amber = the model, blue = the harness (our code), green = tools. */
+:root {
+  --bg: #f6f7f9;
+  --card: #ffffff;
+  --soft: #eef0f4;
+  --fg: #1c2029;
+  --muted: #646c7a;
+  --line: #dde1e8;
+  --model: #b45309;
+  --model-bg: #fdf3e6;
+  --harness: #2453c9;
+  --harness-bg: #eaf0fd;
+  --tool: #1d7a43;
+  --tool-bg: #e8f5ed;
+  --bad: #b42323;
+  --font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #13161c; --card: #1b1f27; --soft: #242934; --fg: #e7eaf0; --muted: #9ba3b1; --line: #2f3542;
+    --model: #f0a65c; --model-bg: #3a2b19; --harness: #86a8ff; --harness-bg: #1e2945;
+    --tool: #66cc8f; --tool-bg: #17311f; --bad: #f08a8a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #13161c; --card: #1b1f27; --soft: #242934; --fg: #e7eaf0; --muted: #9ba3b1; --line: #2f3542;
+  --model: #f0a65c; --model-bg: #3a2b19; --harness: #86a8ff; --harness-bg: #1e2945;
+  --tool: #66cc8f; --tool-bg: #17311f; --bad: #f08a8a;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 17px/1.65 var(--font);
+  padding-inline: 16px;
+  padding-block: 0 72px;
+}
+main { max-width: 760px; margin: 0 auto; display: grid; gap: 72px; }
+h1, h2, h3 { margin: 0; line-height: 1.2; text-wrap: balance; }
+h1 { font-size: clamp(2rem, 6vw, 2.8rem); font-weight: 700; letter-spacing: -0.015em; }
+h2 { font-size: 1.6rem; font-weight: 600; }
+h3 { font-size: 1.05rem; font-weight: 600; }
+p { margin: 0; }
+code { font-family: var(--mono); font-size: 0.85em; background: var(--soft); padding: 0.1em 0.35em; border-radius: 4px; }
+:focus-visible { outline: 2px solid var(--harness); outline-offset: 2px; }
+
+section { display: grid; gap: 20px; }
+.kicker { font-size: 0.8rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--harness); }
+.muted { color: var(--muted); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+
+.model { color: var(--model); } .harness { color: var(--harness); } .tool { color: var(--tool); }
+.tag { font-weight: 600; padding: 0 0.3em; border-radius: 4px; }
+.tag.model { background: var(--model-bg); } .tag.harness { background: var(--harness-bg); } .tag.tool { background: var(--tool-bg); }
+
+/* header */
+header { max-width: 760px; margin: 0 auto; padding-block: 56px 48px; display: grid; gap: 16px; }
+header .lede { font-size: 1.2rem; color: var(--muted); max-width: 40ch; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 0.9rem; }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: currentColor; margin-right: 6px; vertical-align: 0; }
+
+/* 1. three words */
+.words { display: grid; gap: 12px; }
+.word { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 16px; align-items: baseline; padding: 16px 20px; }
+.word h3 { font-size: 1.15rem; }
+.word.m { border-left: 4px solid var(--model); }
+.word.h { border-left: 4px solid var(--harness); }
+.word.a { border-left: 4px solid var(--fg); }
+.equation { font-size: 1.1rem; text-align: center; padding: 16px; }
+
+/* 2. loop */
+.loop { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; counter-reset: s; }
+.loop li { list-style: none; counter-increment: s; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 6px; align-content: start; border-top: 4px solid var(--c); }
+.loop li::before { content: counter(s); font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
+.loop li.h { --c: var(--harness); } .loop li.m { --c: var(--model); } .loop li.t { --c: var(--tool); }
+.loop { padding: 0; margin: 0; }
+.loop-note { text-align: center; font-size: 0.95rem; }
+
+/* 3. replay */
+.replay { display: grid; gap: 16px; }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.pills button {
+  font: 500 0.85rem var(--mono); color: var(--muted); background: var(--card); border: 1px solid var(--line);
+  border-radius: 999px; padding: 4px 12px; cursor: pointer;
+}
+.pills button[aria-current="step"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.stage { display: grid; gap: 14px; min-height: 300px; align-content: start; }
+.stage h3 { font-size: 1.3rem; }
+.bubble { border-radius: 10px; padding: 12px 14px; display: grid; gap: 4px; min-width: 0; }
+.bubble .who { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.bubble.model { background: var(--model-bg); } .bubble.model .who { color: var(--model); }
+.bubble.harness { background: var(--harness-bg); } .bubble.harness .who { color: var(--harness); }
+.bubble.tool { background: var(--tool-bg); } .bubble.tool .who { color: var(--tool); }
+.bubble div:last-child { color: var(--fg); font-size: 0.95rem; }
+.bubble pre { margin: 0; font-family: var(--mono); font-size: 0.8rem; white-space: pre-wrap; word-break: break-word; }
+.why { font-size: 1rem; border-left: 3px solid var(--line); padding-left: 12px; color: var(--muted); }
+.why strong { color: var(--fg); }
+.nav { display: flex; justify-content: space-between; gap: 8px; }
+.nav button {
+  font: 500 0.95rem var(--font); color: var(--fg); background: var(--card); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 16px; cursor: pointer;
+}
+.nav button.next { background: var(--harness); border-color: var(--harness); color: var(--card); }
+.nav button:disabled { opacity: 0.35; cursor: default; }
+
+.gauges { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.gauge { display: grid; gap: 8px; font-size: 0.85rem; }
+.gauge .row { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.track { height: 8px; background: var(--soft); border-radius: 4px; overflow: hidden; }
+.track span { display: block; height: 100%; border-radius: 4px; background: var(--harness); transition: width 250ms ease; }
+.track span.think { background: var(--model); }
+
+/* 4. lessons */
+.lessons { display: grid; gap: 10px; }
+details { background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+summary {
+  list-style: none; cursor: pointer; padding: 14px 18px; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 12px; align-items: baseline;
+}
+summary::-webkit-details-marker { display: none; }
+summary .n { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
+summary .t { font-weight: 600; }
+summary .d { font-family: var(--mono); font-size: 0.8rem; color: var(--tool); text-align: right; font-variant-numeric: tabular-nums; }
+details[open] summary { border-bottom: 1px solid var(--line); }
+details .body { padding: 14px 18px 16px 58px; display: grid; gap: 8px; font-size: 0.95rem; }
+details .body b { font-weight: 600; }
+
+/* 5. evals */
+.score { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.score .card { display: grid; gap: 6px; }
+.big { font-size: 2.2rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.big.good { color: var(--tool); } .big.meh { color: var(--model); }
+.diff { font-family: var(--mono); font-size: 0.8rem; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 0; overflow-x: auto; }
+.diff div { padding: 0 14px; white-space: pre; }
+.diff .add { background: var(--tool-bg); }
+.diff .del { background: color-mix(in srgb, var(--bad) 14%, transparent); }
+
+/* 6. code map */
+.code { font-family: var(--mono); font-size: 0.8rem; line-height: 1.55; margin: 0; white-space: pre; overflow-x: auto; }
+.code .k { color: var(--muted); }
+.pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.pair .card { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.pair .who { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.bigger { display: grid; gap: 10px; padding: 0; margin: 0; list-style: none; }
+.bigger li { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; }
+.bigger b { display: block; }
+@media (max-width: 640px) { .pair { grid-template-columns: minmax(0, 1fr); } }
+.map { display: grid; gap: 0; }
+.map div { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 0.95rem; }
+.map div:last-child { border-bottom: 0; }
+
+footer { max-width: 760px; margin: 72px auto 0; color: var(--muted); font-size: 0.85rem; }
+
+@media (max-width: 640px) {
+  .loop { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .word, .map div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .gauges, .score { grid-template-columns: minmax(0, 1fr); }
+  details .body { padding-left: 18px; }
+}
+@media (prefers-reduced-motion: reduce) { .track span { transition: none; } }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="kicker">A lesson in agent harnesses</span>
+  <h1>Inside the Qwen Review Harness</h1>
+  <p class="lede">How a small local model becomes a code reviewer, and why most of the work is the code around it.</p>
+  <div class="legend">
+    <span class="model">The model</span>
+    <span class="harness">The harness (our code)</span>
+    <span class="tool">Tools</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- 1 -->
+  <section>
+    <span class="kicker">1 · Three words</span>
+    <h2>Model, harness, agent</h2>
+    <div class="words">
+      <div class="card word m"><h3 class="model">Model</h3><p>Reads messages, writes one reply. It can <em>ask</em> for a tool, but it can't run anything or remember anything.</p></div>
+      <div class="card word h"><h3 class="harness">Harness</h3><p>All the code around the model: the loop, the tools, the safety checks, and the checks on its answers.</p></div>
+      <div class="card word a"><h3>Agent</h3><p>Both together, working on a goal. The model picks the next step; the harness decides what's allowed and does it.</p></div>
+    </div>
+    <p class="card equation"><span class="tag model">model</span> + <span class="tag harness">harness</span> = agent</p>
+  </section>
+
+  <!-- 2 -->
+  <section>
+    <span class="kicker">2 · The loop</span>
+    <h2>Every agent is a loop</h2>
+    <ol class="loop">
+      <li class="h"><h3 class="harness">Send</h3><p>The harness sends the whole conversation to the model.</p></li>
+      <li class="m"><h3 class="model">Decide</h3><p>The model replies: "call GitDiff", or "I'm done".</p></li>
+      <li class="t"><h3 class="tool">Run</h3><p>The harness checks the request and runs the tool.</p></li>
+      <li class="h"><h3 class="harness">Remember</h3><p>The result is added to the conversation.</p></li>
+    </ol>
+    <p class="loop-note muted">Repeat until the model says it's done, or until it runs out of steps (15 by default). Then one last call, with no tools, writes the answer.</p>
+  </section>
+
+  <!-- 3 -->
+  <section>
+    <span class="kicker">3 · What is a tool?</span>
+    <h2>A tool is a description plus a function</h2>
+    <p>The model never sees our code. It only sees a <strong>name</strong>, a <strong>description</strong> and the <strong>arguments</strong> a tool takes. When it wants one, it replies with a small JSON request. The harness runs the real function and sends the result back as a new message.</p>
+    <div class="pair">
+      <div class="card">
+        <span class="who model">What the model sees</span>
+<pre class="code">{
+  name: "GitDiffFile",
+  description: "Show the unified diff
+    of a single file changed by the PR.",
+  parameters: {
+    base: string,  <span class="k">// required</span>
+    head: string,
+    path: string   <span class="k">// required</span>
+  }
+}</pre>
+      </div>
+      <div class="card">
+        <span class="who model">What the model replies</span>
+<pre class="code">tool_calls: [{
+  name: "GitDiffFile",
+  arguments: {
+    base: "review-test~1",
+    head: "review-test",
+    path: "src/test/cart.ts"
+  }
+}]</pre>
+        <span class="who harness">What the harness does</span>
+        <p class="muted" style="margin:0">Checks the tool is allowed and the path stays inside the project, runs <code>git diff</code>, cuts the result down if it's too long, and adds it to the conversation.</p>
+      </div>
+    </div>
+    <p class="muted">The description is a prompt too. "Call this first, then GitDiffFile" in the GitDiff description is how the model learns the order.</p>
+  </section>
+
+  <!-- 4 -->
+  <section>
+    <span class="kicker">4 · Watch it work</span>
+    <h2>A real review, step by step</h2>
+    <p class="muted">The reviewer checks a branch where we hid three bugs. These are the real steps and timings from one run.</p>
+    <div class="card replay" aria-live="polite">
+      <div class="pills" id="pills" role="group" aria-label="Jump to step"></div>
+      <div class="stage" id="stage"></div>
+      <div class="gauges">
+        <div class="gauge">
+          <div class="row"><span>Memory used (context)</span><span id="ctxText"></span></div>
+          <div class="track"><span id="ctxBar"></span></div>
+        </div>
+        <div class="gauge">
+          <div class="row"><span>Time for this step</span><span id="timeText"></span></div>
+          <div class="track"><span id="timeBar"></span></div>
+        </div>
+      </div>
+      <div class="nav">
+        <button type="button" id="prev">← Back</button>
+        <button type="button" id="next" class="next">Next →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 -->
+  <section>
+    <span class="kicker">5 · How we built it</span>
+    <h2>Each step fixed one problem</h2>
+    <p class="muted">Open any step to see what went wrong and what we changed. Almost every fix was in the harness, not the model.</p>
+    <div class="lessons" id="lessons"></div>
+  </section>
+
+  <!-- 6 -->
+  <section>
+    <span class="kicker">6 · Is it any good?</span>
+    <h2>Measure it with evals</h2>
+    <p>A normal test checks that the same input gives the same output. The model answers differently every time, so we use an <strong>eval</strong>: plant known bugs, run the reviewer several times, and count how many it finds.</p>
+    <div class="diff" aria-label="The three planted bugs">
+      <div class="del">-  for (let i = 0; i &lt; items.length; i++) {</div>
+      <div class="add">+  for (let i = 0; i &lt;= items.length; i++) {        ← bug 1: one step too far</div>
+      <div class="del">-  if (percent &lt; 0 || percent &gt; 100) throw …           ← bug 2: check deleted</div>
+      <div class="add">+  if (percent &lt; 0) throw …</div>
+      <div class="del">-  const items = await fetchItems();</div>
+      <div class="add">+  const items = fetchItems();                       ← bug 3: missing await</div>
+    </div>
+    <div class="score">
+      <div class="card">
+        <span class="muted">Bugs shown as edits</span>
+        <span class="big good">9 / 9</span>
+        <span class="muted">found in 3 runs, 0 false alarms</span>
+      </div>
+      <div class="card">
+        <span class="muted">Same file, shown as new</span>
+        <span class="big meh">6 / 9</span>
+        <span class="muted">missed bug 2 every time</span>
+      </div>
+    </div>
+    <p>Bug 2 is a <em>deleted</em> line. When the reviewer can see the deletion, it catches it. When it can't, it never does. <strong>What the model sees decides what it can find.</strong></p>
+  </section>
+
+  <!-- 7 -->
+  <section>
+    <span class="kicker">7 · Going further</span>
+    <h2>What bigger agents add</h2>
+    <p>This reviewer is the smallest honest version of an agent. Tools like Claude Code or CodeRabbit run the same loop, with a lot more harness around it:</p>
+    <ul class="bigger">
+      <li><b>Context management</b><span class="muted">Summarize or drop old messages when the window fills up, instead of just cutting tool results.</span></li>
+      <li><b>Stronger guardrails</b><span class="muted">Permissions, sandboxes, and asking the user before anything risky like writing files or running commands.</span></li>
+      <li><b>Bigger evals</b><span class="muted">Hundreds of real cases instead of three planted bugs, run on every change to the prompt or the harness.</span></li>
+      <li><b>More than one agent</b><span class="muted">One agent hands a sub-task to another, which starts with a clean context and returns only the answer.</span></li>
+    </ul>
+  </section>
+
+  <!-- 8 -->
+  <section>
+    <span class="kicker">8 · Read the code</span>
+    <h2>Where to look</h2>
+    <div class="card map">
+      <div><code>src/agent.ts</code><span>The loop. Start here.</span></div>
+      <div><code>src/tools/tools.ts</code><span>What the model sees: each tool's name, description and arguments.</span></div>
+      <div><code>src/tools/core/</code><span>The real functions (git.ts, read_files.ts) and their safety checks.</span></div>
+      <div><code>src/review/review.ts</code><span>The review: gather, then judge.</span></div>
+      <div><code>src/review/verify.ts</code><span>Checks the model's answers against the real diff.</span></div>
+      <div><code>evals/</code><span>The planted bugs and the scoring.</span></div>
+    </div>
+    <p class="muted">Try it: <code>bun run review --trace review-test~1 review-test</code></p>
+  </section>
+
+</main>
+
+<footer>Real runs from 10 October 2026: qwen3:8b in Ollama on an Apple M5 laptop with 16 GB. Timings vary between runs.</footer>
+
+<script>
+const CTX = 32768;
+const STEPS = [
+  { label: "1", title: "Look at what changed", ms: 3154, ctx: 728,
+    model: 'GitDiff(base: "review-test~1", head: "review-test")',
+    harness: "Checks the branch names are real, then runs git diff.",
+    tool: "1 file changed: src/test/cart.ts (+5, −4)",
+    why: "The model chose to start here. Nobody wrote that rule into the code." },
+  { label: "2", title: "Read the changes", ms: 1730, ctx: 794,
+    model: 'GitDiffFile(path: "src/test/cart.ts")',
+    harness: "Checks the path stays inside the project, then gets the diff.",
+    tool: "-  i < items.length\n+  i <= items.length\n…",
+    why: "Fast, because thinking is <strong>off</strong> while gathering. With it on, the same step took about 10 seconds." },
+  { label: "3", title: "Read the commit message", ms: 2204, ctx: 1184,
+    model: "GitLog()",
+    harness: "Runs git log.",
+    tool: '"refactor: tidy up cart helpers"',
+    why: "A refactor shouldn't change behaviour. That's what makes these changes suspicious." },
+  { label: "4", title: "Read the new version", ms: 1387, ctx: 1289,
+    model: 'ReadFile(path: "src/test/cart.ts", ref: "review-test")',
+    harness: "Reads the file from the branch, not from the disk.",
+    tool: "export function cartTotal(items) { … }",
+    why: "The disk has a different version. Reading the branch gives the code the PR actually contains." },
+  { label: "5", title: "Read the old version", ms: 2039, ctx: 1544,
+    model: 'ReadFile(path: "src/test/cart.ts", ref: "review-test~1")',
+    harness: "Same checks, older version.",
+    tool: "if (percent < 0 || percent > 100) …",
+    why: "Nobody told it to compare versions. <strong>This is the agent part:</strong> the model decided." },
+  { label: "6", title: "\"DONE\"", ms: 841, ctx: 1799,
+    model: "DONE",
+    harness: "No tool requested, so gathering is over.",
+    tool: null,
+    why: "We told it to reply only \"DONE\". Before that, it wrote a whole throwaway review here, wasting up to 77 seconds." },
+  { label: "7", title: "Write the review (thinking on)", ms: 43263, ctx: 1421, think: true,
+    model: "Thinks for ~3,000 characters, then:\n• bug, line 8: i <= items.length\n• bug, line 18: missing await\n• bug, line 10: discount check removed",
+    harness: "Turns thinking on for this one call and asks for findings in a fixed JSON shape.",
+    tool: null,
+    why: "43 of the 55 seconds are here. We spend thinking on <strong>judging</strong> the code, not on choosing which file to open." },
+  { label: "8", title: "Check the answer", ms: 0, ctx: 1421,
+    model: null,
+    harness: "Looks for each quoted line in the real diff, and moves each finding to where that line actually is.",
+    tool: "line 8 → 9 ✓\nline 18 → 21 ✓\nline 10 → 16 ✓\n3 bugs found, 3 line numbers fixed",
+    why: "All three bugs were found and all three line numbers were wrong. <strong>Never trust what the model quotes. Check it.</strong>" },
+];
+
+const LESSONS = [
+  { t: "A loop with one tool", d: "", problem: "A model can only write text. It can't look at files.", fix: "A loop that runs the tool the model asks for and sends back the result.", learn: "The model asks. The harness does." },
+  { t: "Safety checks in the tools", d: "", problem: "The model could ask to read files outside the project.", fix: "Every tool rejects paths outside the project folder.", learn: "Rules belong in code, not in the prompt." },
+  { t: "A reusable loop with a trace", d: "", problem: "The loop was stuck inside one script, and we couldn't see what it did.", fix: "runAgent(), which records tokens and time for every step.", learn: "You can't fix what you can't see." },
+  { t: "Hidden thinking", d: "35 s → 1 s", problem: "One simple step took 35 seconds. The model was secretly thinking, and that text piled up in the conversation.", fix: "Keep the thinking out of the history, and turn it off for simple steps.", learn: "Thinking is slow. Use it only where it helps." },
+  { t: "Memory", d: "9.9 → 7.7 GB", problem: "The default context window is small and silently forgets old messages.", fix: "A 32k window, with a compressed cache so it fits in 16 GB.", learn: "The context window costs memory, and it's reserved up front." },
+  { t: "Git tools", d: "19 tests", problem: "A reviewer needs to see what changed, not just read files.", fix: "Tools for the diff, one file's diff, the commit log, and a file at a branch.", learn: "Check what an argument means, not just how it's quoted." },
+  { t: "The first review failed", d: "no review → 3 min", problem: "The agent read a huge lockfile, ran out of steps, and wrote nothing.", fix: "Skip lockfiles, allow more steps, and always write an answer at the end.", learn: "Predictable steps don't need the model." },
+  { t: "Checkable answers", d: "3/3 lines fixed", problem: "The model invented formats, wrong line numbers and extra characters.", fix: "A fixed answer shape, and a check of every quote against the diff.", learn: "Verify the model's output against real data." },
+  { t: "Evals", d: "9/9", problem: "One good run can be luck.", fix: "Planted bugs, several runs, automatic scoring.", learn: "Measure every change before you keep it." },
+];
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const maxMs = Math.max(...STEPS.map((s) => s.ms));
+let i = 0;
+
+function bubble(cls, who, text) {
+  return `<div class="bubble ${cls}"><span class="who">${who}</span><div><pre>${esc(text)}</pre></div></div>`;
+}
+
+function render() {
+  const s = STEPS[i];
+  $("stage").innerHTML =
+    `<h3>Step ${s.label} · ${esc(s.title)}</h3>` +
+    (s.model ? bubble("model", s.think ? "Model (thinking)" : "Model asks", s.model) : "") +
+    `<div class="bubble harness"><span class="who">Harness</span><div>${esc(s.harness)}</div></div>` +
+    (s.tool ? bubble("tool", s.label === "8" ? "Result" : "Tool returns", s.tool) : "") +
+    `<p class="why">${s.why}</p>`;
+  $("ctxBar").style.width = Math.max(1, (s.ctx / CTX) * 100) + "%";
+  $("ctxText").textContent = `${s.ctx.toLocaleString()} / ${CTX.toLocaleString()} tokens`;
+  $("timeBar").style.width = Math.max(1, (s.ms / maxMs) * 100) + "%";
+  $("timeBar").className = s.think ? "think" : "";
+  $("timeText").textContent = s.ms ? `${(s.ms / 1000).toFixed(1)} s` : "instant";
+  document.querySelectorAll("#pills button").forEach((b, n) => b.setAttribute("aria-current", n === i ? "step" : "false"));
+  $("prev").disabled = i === 0;
+  $("next").disabled = i === STEPS.length - 1;
+}
+
+$("pills").innerHTML = STEPS.map((s, n) => `<button type="button" data-n="${n}" aria-label="Step ${s.label}: ${esc(s.title)}">${s.label}</button>`).join("");
+$("pills").addEventListener("click", (e) => { const n = e.target.closest("button")?.dataset.n; if (n !== undefined) { i = Number(n); render(); } });
+$("prev").addEventListener("click", () => { if (i > 0) { i--; render(); } });
+$("next").addEventListener("click", () => { if (i < STEPS.length - 1) { i++; render(); } });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowRight") $("next").click();
+  if (e.key === "ArrowLeft") $("prev").click();
+});
+render();
+
+$("lessons").innerHTML = LESSONS.map((l, n) => `
+  <details>
+    <summary><span class="n">${n + 1}</span><span class="t">${esc(l.t)}</span><span class="d">${esc(l.d)}</span></summary>
+    <div class="body">
+      <p><b>Problem:</b> ${esc(l.problem)}</p>
+      <p><b class="harness">Fix:</b> ${esc(l.fix)}</p>
+      <p><b class="tool">Lesson:</b> ${esc(l.learn)}</p>
+    </div>
+  </details>`).join("");
+</script>
+</body>
+</html>

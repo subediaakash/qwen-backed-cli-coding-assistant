@@ -191,3 +191,4 @@ What has to be true before it's "good enough" to post on real PRs:
 | 2026-10-10 | Planted-bug branch `review-test`: 2/3 bugs found when the file is new, 3/3 when the bugs appear as changes. Service plan added (Step 6). |
 | 2026-10-10 | `ReadFile` with an optional `ref` (`gitReadFile` in git.ts); 19 tests. |
 | 2026-10-10 | Structured review pipeline (`src/review/`), evidence check with line correction, DONE trick, eval runner; 31 tests. |
+| 2026-10-10 | First eval (3 runs each): cart-changes 9/9 recall, 0 FP, avg 72s; cart-new-file 6/9 (discount-bound missed 3/3), 0 FP, avg 80s. Added docs/harness.html (visual walkthrough). |
