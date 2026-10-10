@@ -1,10 +1,9 @@
-import ollama, { type Message } from "ollama";
-import { executeTool, getToolDefinitions } from "./tools/tools.ts";
+import { runAgent, type TraceStep } from "./agent.ts";
 
-const MODEL = "qwen3:4b";
-const MAX_STEPS = 5;
-// Ollama defaults to a small context window and silently drops older tokens past it.
-const NUM_CTX = 16384;
+const NUM_CTX = 32768;
+
+const SYSTEM_PROMPT =
+  "You are a local coding assistant. Use the ListFiles tool (with dir \".\" for the workspace root) when you need to inspect the workspace, and ReadFile to read a file. Never invent filenames. Answer using tool results when available.";
 
 const ANSWER_SCHEMA = {
   type: "object",
@@ -15,74 +14,60 @@ const ANSWER_SCHEMA = {
   required: ["answer", "files"],
 };
 
-async function main() {
-  const messages: Message[] = [
-    {
-      role: "system",
-      content:
-        "You are a local coding assistant. Use the ListFiles tool (with dir \".\" for the workspace root) when you need to inspect the workspace. Never invent filenames. Answer using tool results when available.",
-    },
-    {
-      role: "user",
-      content: "Can you tell me what do we have at src/test/check.ts",
-    },
-  ];
-
-  const tools = getToolDefinitions();
-
-  for (let step = 0; step < MAX_STEPS; step++) {
-    const response = await ollama.chat({
-      model: MODEL,
-      messages,
-      tools,
-      think: false,
-      stream: false,
-      options: { num_ctx: NUM_CTX },
-    });
-
-    messages.push(response.message);
-    const toolCalls = response.message.tool_calls ?? [];
-
-    // No tool calls means the model is done; ask it to restate the answer as structured JSON.
-    if (toolCalls.length === 0) {
-      const final = await ollama.chat({
-        model: MODEL,
-        messages: [
-          ...messages,
-          { role: "user", content: "Return your answer as JSON matching the schema." },
-        ],
-        format: ANSWER_SCHEMA,
-        think: false,
-        stream: false,
-        options: { num_ctx: NUM_CTX },
-      });
-
-      const result = JSON.parse(final.message.content);
-      console.log(JSON.stringify(result, null, 2));
-      return;
-    }
-
-    for (const call of toolCalls) {
-      const { name, arguments: args } = call.function;
-      console.log(`[tool] ${name}(${JSON.stringify(args)})`);
-
-      let result: unknown;
-      try {
-        result = await executeTool(name, args);
-      } catch (error) {
-        result = { error: error instanceof Error ? error.message : String(error) };
-      }
-
-      messages.push({
-        role: "tool",
-        tool_name: name,
-        content: JSON.stringify(result),
-      });
+function printTrace(trace: TraceStep[]) {
+  for (const step of trace) {
+    console.error(
+      `[step ${step.step}] prompt=${step.promptTokens}/${NUM_CTX} tokens, output=${step.outputTokens}, thinking=${step.thinking?.length ?? 0} chars, ${Math.round(step.ms)}ms`,
+    );
+    for (const call of step.toolCalls) {
+      const flags = [call.truncated && "truncated", call.error && `error: ${call.error}`].filter(Boolean).join(", ");
+      console.error(
+        `  ${call.name}(${JSON.stringify(call.args)}) → ${call.resultChars} chars, ${Math.round(call.ms)}ms${flags ? ` (${flags})` : ""}`,
+      );
     }
   }
+}
 
-  console.error(`Stopped after ${MAX_STEPS} steps without a final answer.`);
-  process.exitCode = 1;
+async function main() {
+  const args = Bun.argv.slice(2);
+  const showTrace = args.includes("--trace");
+  const modelIndex = args.indexOf("--model");
+  const model = modelIndex >= 0 ? args[modelIndex + 1] : undefined;
+  const question = args
+    .filter((a, i) => a !== "--trace" && (modelIndex < 0 || (i !== modelIndex && i !== modelIndex + 1)))
+    .join(" ")
+    .trim();
+
+  if (!question || (modelIndex >= 0 && !model)) {
+    console.error('Usage: bun src/index.ts [--trace] [--model <name>] "<question>"');
+    process.exitCode = 1;
+    return;
+  }
+
+  const result = await runAgent({
+    system: SYSTEM_PROMPT,
+    user: question,
+    tools: ["ListFiles", "ReadFile"],
+    schema: ANSWER_SCHEMA,
+    numCtx: NUM_CTX,
+    model,
+    // Picking a tool and reading a file needs no reasoning; thinking made each step ~10x slower.
+    think: false,
+  });
+
+  if (showTrace) {
+    console.error(`[model] ${result.model}, think=${result.think}`);
+    printTrace(result.trace);
+  }
+
+  if (result.stopReason !== "done") {
+    console.error(`Agent stopped: ${result.stopReason}`);
+    if (result.raw) console.error(result.raw);
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(JSON.stringify(result.output, null, 2));
 }
 
 main().catch((error: unknown) => {

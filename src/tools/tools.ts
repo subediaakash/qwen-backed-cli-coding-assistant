@@ -62,8 +62,11 @@ export async function getToolNames(): Promise<string[]> {
 }
 
 // Tool schemas in the shape Ollama's chat API expects (without the func implementation).
-export function getToolDefinitions(): Tool[] {
-    return tools.map(({ type, name, description, parameters }) => ({
+// Pass names to expose only a subset of tools to the model.
+export function getToolDefinitions(names?: string[]): Tool[] {
+    return tools
+        .filter(t => !names || names.includes(t.name))
+        .map(({ type, name, description, parameters }) => ({
         type,
         function: { name, description, parameters },
     }));
