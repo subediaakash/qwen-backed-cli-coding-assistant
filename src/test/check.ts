@@ -1,0 +1,1 @@
+export const word ="hello i am aakash"

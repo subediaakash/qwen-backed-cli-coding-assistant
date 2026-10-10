@@ -22,7 +22,7 @@ async function main() {
     },
     {
       role: "user",
-      content: "List files in ../../",
+      content: "Can you tell me what do we have at src/test/check.ts",
     },
   ];
 

@@ -1,6 +1,16 @@
+import type {Tool} from 'ollama';
 import {listFiles} from './core/list_files.ts';
+import {readWorkspaceFile} from './core/read_files.ts';
 
-const tools = [
+type ToolEntry = {
+    type: "function";
+    name: string;
+    description: string;
+    parameters: NonNullable<Tool["function"]["parameters"]>;
+    func: (args: any) => Promise<unknown>;
+};
+
+const tools: ToolEntry[] = [
     {
         type : "function" as const ,
         name :"ListFiles",
@@ -18,6 +28,24 @@ const tools = [
         func : async (args: { dir: string }) => {
             return await listFiles(args.dir);
         },
+    },
+    {
+        type : "function" as const ,
+        name :"ReadFile",
+        description : "Read the text contents of a single file inside the workspace (max 100 KB). Use ListFiles first to find the exact path.",
+        parameters : {
+            type : "object" as const ,
+            properties : {
+                path : {
+                    type : "string" as const ,
+                    description : "File path relative to the workspace root, e.g. \"src/index.ts\".",
+                },
+            },
+            required : ["path"],
+        },
+        func : async (args: { path: string }) => {
+            return await readWorkspaceFile(args);
+        },
     }
 ]
 
@@ -34,7 +62,7 @@ export async function getToolNames(): Promise<string[]> {
 }
 
 // Tool schemas in the shape Ollama's chat API expects (without the func implementation).
-export function getToolDefinitions() {
+export function getToolDefinitions(): Tool[] {
     return tools.map(({ type, name, description, parameters }) => ({
         type,
         function: { name, description, parameters },
