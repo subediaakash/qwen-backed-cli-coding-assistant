@@ -3,6 +3,8 @@ import { executeTool, getToolDefinitions } from "./tools/tools.ts";
 
 const MODEL = "qwen3:4b";
 const MAX_STEPS = 5;
+// Ollama defaults to a small context window and silently drops older tokens past it.
+const NUM_CTX = 16384;
 
 const ANSWER_SCHEMA = {
   type: "object",
@@ -35,6 +37,7 @@ async function main() {
       tools,
       think: false,
       stream: false,
+      options: { num_ctx: NUM_CTX },
     });
 
     messages.push(response.message);
@@ -51,6 +54,7 @@ async function main() {
         format: ANSWER_SCHEMA,
         think: false,
         stream: false,
+        options: { num_ctx: NUM_CTX },
       });
 
       const result = JSON.parse(final.message.content);

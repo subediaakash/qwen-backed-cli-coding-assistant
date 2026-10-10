@@ -38,10 +38,10 @@ Model: `qwen3:4b` through the `ollama` npm package, `think: false`, non-streamin
 
 ## Known issues / cleanup 🧹
 
-- [ ] `package.json` has junk deps `"-"` and `"D"` (likely from a mistyped `bun add -D`), plus `tsx` (not needed with Bun). Remove them.
+- [x] `package.json` has junk deps `"-"` and `"D"` (likely from a mistyped `bun add -D`), plus `tsx` (not needed with Bun). Remove them.
 - [ ] `ListFiles` doesn't use `realpath`, so a symlink inside the repo could point outside it. Align with `ReadFile`.
 - [ ] The user prompt is hardcoded in `index.ts`; take it from CLI args instead.
-- [ ] Ollama's default context window is small (often 2–4k tokens). Set `options: { num_ctx: ... }` explicitly, or diffs and files will be silently truncated.
+- [x] Ollama's default context window is small (often 2–4k tokens). Set `options: { num_ctx: ... }` explicitly, or diffs and files will be silently truncated.
 - [ ] There's no test suite yet (`src/test/check.ts` is only a fixture). Add `bun test` tests for tool guardrails.
 
 ---
@@ -85,3 +85,4 @@ Model: `qwen3:4b` through the `ollama` npm package, `think: false`, non-streamin
 |------|--------------|
 | — | Basic tool loop + `ListFiles` (`d77c66c`, `2ec48af`) |
 | 2026-10-10 | Added `ReadFile`; created this doc |
+| 2026-10-10 | Removed junk deps; set `num_ctx: 16384` on both chat calls |

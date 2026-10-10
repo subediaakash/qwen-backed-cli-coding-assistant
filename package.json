@@ -10,10 +10,6 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "-": "^0.0.1-security.1",
-    "@types/node": "^26.6.4",
-    "D": "^1.0.0",
-    "ollama": "^0.6.4",
-    "tsx": "^4.23.15"
+    "ollama": "^0.6.4"
   }
 }
