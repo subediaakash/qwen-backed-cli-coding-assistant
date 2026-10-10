@@ -3,6 +3,12 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "ask": "bun src/index.ts",
+    "review": "bun src/review/cli.ts",
+    "eval": "bun evals/run.ts",
+    "test": "bun test"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { gitDiffFile, gitDiffSummary, gitLog } from "./git.ts";
+import { gitDiffFile, gitDiffSummary, gitLog, gitReadFile } from "./git.ts";
 
 // Two early commits from this repo's history: "simple tool calling agent" → "guardrails on the list tool".
 const BASE = "d77c66c";
@@ -68,4 +68,33 @@ test("a path that looks like a flag is treated as a path, not an option", async 
   // After "--" git reads "--stat" as a filename, which the PR didn't change.
   const result = await gitDiffFile({ base: BASE, head: HEAD, path: "--stat" });
   expect(result).toEqual({ error: `No changes to "--stat" between ${BASE} and ${HEAD}.` });
+});
+
+// src/test/cart.ts only exists on the review-test branch: clean at review-test~1, with planted bugs at review-test.
+test("ReadFile at a ref reads that version, not the working tree", async () => {
+  const buggy = await gitReadFile({ ref: "review-test", path: "src/test/cart.ts" });
+  const clean = await gitReadFile({ ref: "review-test~1", path: "src/test/cart.ts" });
+  if ("error" in buggy) throw new Error(buggy.error);
+  if ("error" in clean) throw new Error(clean.error);
+  expect(buggy.content).toContain("i <= items.length");
+  expect(clean.content).toContain("i < items.length");
+  expect(buggy.ref).toBe("review-test");
+});
+
+test("ReadFile at a ref normalizes paths like ./src/../src/x", async () => {
+  const result = await gitReadFile({ ref: "review-test", path: "./src/../src/test/cart.ts" });
+  expect(result).toHaveProperty("path", "src/test/cart.ts");
+});
+
+test("ReadFile at a ref reports files missing at that ref", async () => {
+  expect(await gitReadFile({ ref: BASE, path: "src/test/cart.ts" })).toEqual({
+    error: `"src/test/cart.ts" does not exist at ${BASE}.`,
+  });
+});
+
+test.each([
+  ["bad ref", "--output=/tmp/pwned", "src/test/cart.ts"],
+  ["path outside workspace", "review-test", "../../etc/passwd"],
+])("ReadFile at a ref rejects %s", async (_, ref, path) => {
+  expect(await gitReadFile({ ref, path })).toHaveProperty("error");
 });

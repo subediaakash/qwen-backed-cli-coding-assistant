@@ -3,6 +3,7 @@ import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 
 const WORKSPACE = process.cwd();
 const MAX_COMMITS = 50;
+const MAX_FILE_BYTES = 100 * 1024; // 100 KB, same limit as ReadFile on the working tree
 // Branch names, tags, hashes and HEAD~1 / main^ style suffixes. No spaces, no shell or git syntax beyond that.
 const REF_PATTERN = /^[A-Za-z0-9._\/~^-]+$/;
 // Generated dependency lockfiles: huge diffs with nothing to review, which would crowd out real code.
@@ -156,4 +157,28 @@ export async function gitLog(args: { base: string; head?: string }): Promise<{ c
     });
 
   return { commits: commits.slice(0, MAX_COMMITS), truncated: commits.length > MAX_COMMITS };
+}
+
+// Reads a file as it exists at a ref (e.g. the PR head), not as it is on disk.
+export async function gitReadFile(
+  args: { ref: string; path: string },
+): Promise<{ path: string; ref: string; content: string; lines: number } | GitError> {
+  const refError = await validateRef(args.ref);
+  if (refError) return { error: refError };
+  const pathError = validatePath(args.path);
+  if (pathError) return { error: pathError };
+
+  // git wants the path relative to the repository root, with forward slashes.
+  const path = relative(WORKSPACE, resolve(WORKSPACE, args.path)).split(sep).join("/");
+  const object = `${args.ref}:${path}`;
+
+  const size = await git(["cat-file", "-s", object]);
+  if (!size.ok) return { error: `"${path}" does not exist at ${args.ref}.` };
+  if (Number(size.stdout.trim()) > MAX_FILE_BYTES) {
+    return { error: "File exceeds the 100 KB limit. Use GitDiffFile to see only what changed." };
+  }
+
+  const result = await git(["show", object]);
+  if (!result.ok) return { error: result.error };
+  return { path, ref: args.ref, content: result.stdout, lines: result.stdout.split("\n").length };
 }

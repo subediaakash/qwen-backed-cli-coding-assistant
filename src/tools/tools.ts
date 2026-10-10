@@ -1,7 +1,7 @@
 import type {Tool} from 'ollama';
 import {listFiles} from './core/list_files.ts';
 import {readWorkspaceFile} from './core/read_files.ts';
-import {gitDiffFile, gitDiffSummary, gitLog} from './core/git.ts';
+import {gitDiffFile, gitDiffSummary, gitLog, gitReadFile} from './core/git.ts';
 
 type ToolEntry = {
     type: "function";
@@ -33,7 +33,7 @@ const tools: ToolEntry[] = [
     {
         type : "function" as const ,
         name :"ReadFile",
-        description : "Read the text contents of a single file inside the workspace (max 100 KB). Use ListFiles first to find the exact path.",
+        description : "Read the text contents of a single file inside the workspace (max 100 KB). Use ListFiles first to find the exact path. When reviewing changes between refs, pass ref (the head branch or commit) to read the file as it is on that branch instead of on disk.",
         parameters : {
             type : "object" as const ,
             properties : {
@@ -41,11 +41,15 @@ const tools: ToolEntry[] = [
                     type : "string" as const ,
                     description : "File path relative to the workspace root, e.g. \"src/index.ts\".",
                 },
+                ref : {
+                    type : "string" as const ,
+                    description : "Optional branch, tag, or commit to read the file at, e.g. the PR head. Omit to read the file on disk.",
+                },
             },
             required : ["path"],
         },
-        func : async (args: { path: string }) => {
-            return await readWorkspaceFile(args);
+        func : async (args: { path: string; ref?: string }) => {
+            return args.ref ? await gitReadFile({ ref: args.ref, path: args.path }) : await readWorkspaceFile(args);
         },
     },
     {

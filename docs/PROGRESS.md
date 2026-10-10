@@ -9,7 +9,12 @@ The harness is everything around the model: the loop, the tools, the guardrails,
 ## Current architecture
 
 ```
-src/index.ts              thin CLI: parses argv, calls runAgent, prints result (+ trace with --trace)
+src/index.ts              Q&A CLI (`bun run ask`): parses argv, calls runAgent, prints result (+ trace with --trace)
+src/trace.ts              shared trace printer
+src/review/review.ts      reviewChanges({ base, head }): gather (think off) → review (think on) → verify findings
+src/review/verify.ts      parseDiff + verifyFinding: evidence must be in the diff; corrects line numbers
+src/review/cli.ts         `bun run review [--trace] [--json] <base> [head]`
+evals/                    cases.ts (planted bugs), score.ts, run.ts (`bun run eval [--runs N] [--case name]`)
 src/agent.ts              runAgent(config) → { output, stopReason, trace }: the reusable loop
 src/tools/tools.ts        tool registry: schemas for Ollama (optionally a subset) + executeTool dispatcher
 src/tools/core/*.ts       tool implementations (sandboxed to the workspace)
@@ -116,20 +121,53 @@ harness: merge → markdown report
 ```
 
 - [x] 4a — Separate thinking setting for the final call (`thinkFinal`), recorded in the trace as `step final`.
-- [ ] Stop the wasted step: in review mode, tell the model to reply only "DONE" once it has read every changed file.
+- [x] Stop the wasted step: the gather prompt says to reply only "DONE". That step went from 12–77s to 0.8s (2 tokens).
 - [ ] Skip docs/markdown in reviews (or rank them last).
-- [ ] 4b — Findings schema `{ line, severity: "bug"|"risk"|"nit", message, evidence }` with a `description` on every field.
-- [ ] 4c — Review system prompt: correctness over style, quote evidence exactly, return no findings rather than guess.
-- [ ] 4d — `src/review.ts --base <ref> --head <ref>`: gather → filter → per-file review → merge.
-- [ ] 4e — Evidence check: drop findings whose `evidence` doesn't appear in the file's diff.
-- [ ] 4f — Markdown report output.
-- [ ] Test: a throwaway branch with a planted bug (missing `await`, off-by-one).
+- [x] 4b — Findings schema `{ line, severity: "bug"|"risk"|"nit", message, evidence }` . Ollama's `format` only *constrains* output and never shows the schema to the model, so the field meanings are spelled out in the review prompt.
+- [x] 4c — Review system prompt: correctness over style, quote evidence exactly, return no findings rather than guess.
+- [x] 4d — `bun run review <base> [head]` (`src/review/`). It's still one agent run, not per-file; revisit for large PRs.
+- [x] 4e — Evidence check: drop findings whose `evidence` doesn't appear in the file's diff.
+- [x] 4f — Terminal report: findings with severity, file:line, message and quoted evidence; lines moved by the harness are marked "(model said line N)"; dropped findings are listed with a reason.
+- [x] Test: branch `review-test` (two commits on 684d832). `c3ba151` adds a clean `src/test/cart.ts`; `47d9419` "refactor: tidy up cart helpers" plants 3 bugs: `i <= items.length` (line 9), the removed `percent > 100` check (line 16), and the removed `await` hidden by `as unknown as Item[]` (line 21). It also adds one harmless comment.
 
-### Step 5 — Evals
+  | Base | Run | Bugs found | False alarms | Lines | Time |
+  |---|---|---|---|---|---|
+  | `review-test~2` (whole file shown as new) | 1 | 2/3 (missed discount) | 0 | 1 right, 1 wrong | 58s |
+  | `review-test~2` | 2 | 2/3 (missed discount) | 0 | none given | 70s |
+  | `review-test~1` (bugs shown as changes) | 1 | **3/3** | 0 | none given | 174s |
+  | `review-test~1` | 2 | **3/3** | 0 | none given | 98s |
+
+  Lessons:
+  - **Removed lines are evidence.** The discount bug is only visible as a *deletion*, so it was caught every time it appeared in the diff as one and missed every time it didn't.
+  - The model invents its own findings format inside `answer` (`review`, `reviews`, `category`, …). It needs a real schema (4b).
+  - The step before the final call still writes a full review without thinking (12–77s wasted).
+
+
+**First structured run (review-test~1 → review-test): 3/3 bugs found, 55s. The model got all three line numbers wrong (8, 18, 10), and the harness moved them to the quoted code (9, 21, 16).**
+
+### Step 5 — Evals (script ✅, more cases needed)
+- [x] `evals/run.ts`: runs each case N times, scores caught/missed/false positives/dropped/line fixes, and saves JSON to `evals/results/` (gitignored). A finding catches a bug if it's in the same file and within ±2 lines or mentions a keyword; one finding catches at most one bug.
+- [x] Cases: `cart-changes` (review-test~1 → review-test) and `cart-new-file` (review-test~2 → review-test). Both depend on the local `review-test` branch.
 - [ ] Fixture branches with planted bugs (off-by-one, missing await, null deref, path traversal).
 - [ ] Script that runs the reviewer on them and scores recall/precision. This is how we know whether prompt and tool changes actually help.
 
-### Step 6 — Output & integration
+### Step 6 — Run it on real GitHub PRs (service)
+
+Plan, in order:
+1. **`--pr <number>` mode (CLI, dry run).** Fetch with `git fetch origin pull/N/head`, review base...head, print the comments that *would* be posted.
+2. ✅ **Tools read at the PR's head, not the working tree.** `ReadFile` takes an optional `ref` and then reads with `git show <ref>:<path>` (same ref/path checks as the git tools, 100 KB limit via `git cat-file -s`). There are 5 more tests (19 total). End to end, the model passed `ref: "review-test"` without prompting and quoted the file exactly.
+3. **Post the review** with `gh api …/pulls/N/reviews`: one review with inline comments, on lines that exist in the diff. Comment only; never approve or request changes. Test against a private sandbox repo first.
+4. **Polling service:** a local loop that runs `gh pr list --search "review-requested:@me"` every few minutes. It records reviewed head SHAs in `bun:sqlite` so each push is reviewed once, handles one review at a time (one GPU), and runs as a `launchd` agent. No public URL needed.
+5. Optional later: a webhook (`Bun.serve` + tunnel + signature check), or a self-hosted Actions runner (private repos only).
+
+What has to be true before it's "good enough" to post on real PRs:
+- Structured findings + evidence check + mapping lines to the diff (4b, 4e).
+- An eval suite (Step 5) with recall **and** false-positive rate. False positives are what make people mute a bot.
+- Per-file reviews or a size limit for large PRs; skip docs, generated and vendored files.
+- Robustness: retry on `bad_json`, timeouts, errors when Ollama is down, traces saved to disk.
+- Security: the PR content is untrusted input (prompt injection). Keep tools read-only, comment only, and use a token with minimal scope.
+
+### Step 7 — Output & integration (older notes)
 - [ ] Markdown report printed to the terminal.
 - [ ] Optional: post as PR comments via `gh` (opt-in flag).
 - [ ] Try larger Qwen models (e.g. `qwen3:8b`, `qwen2.5-coder`) and compare on the evals.
@@ -150,3 +188,6 @@ harness: merge → markdown report
 | 2026-10-10 | `think: false` for the Q&A CLI: run time 43s → 7–13s. Prose answers and `files` are now correct; the invented `;` remains. |
 | 2026-10-10 | Step 2: GitDiff / GitDiffFile / GitLog with ref and path validation and 13 tests; enabled in the CLI. |
 | 2026-10-10 | `thinkFinal` + `finalPrompt`, `--review` flag, maxSteps 15 with an answer even when steps run out, lockfiles ignored by the git tools (14 tests). |
+| 2026-10-10 | Planted-bug branch `review-test`: 2/3 bugs found when the file is new, 3/3 when the bugs appear as changes. Service plan added (Step 6). |
+| 2026-10-10 | `ReadFile` with an optional `ref` (`gitReadFile` in git.ts); 19 tests. |
+| 2026-10-10 | Structured review pipeline (`src/review/`), evidence check with line correction, DONE trick, eval runner; 31 tests. |
